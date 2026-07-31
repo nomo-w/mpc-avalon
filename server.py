@@ -8,6 +8,7 @@ from avalon.game.models import Alignment, AvalonError, GamePhase
 from avalon.networking.json_stream import receive_json, send_json
 from avalon.networking.messages import error, message
 from avalon.protocols.mission_voting.gmw import GMWMissionVotingProtocol
+from avalon.protocols.role_assignment.role_information import private_role_lines
 from avalon.protocols.role_assignment.trusted import TrustedRoleAssignmentProtocol
 
 
@@ -165,14 +166,21 @@ class GameServer:
             self.engine.set_phase(GamePhase.TRUSTED_ROLE_ASSIGNMENT)
             role_protocol = TrustedRoleAssignmentProtocol(self.engine.rng)
             self.engine.set_roles(role_protocol.assign_roles(len(ordered)))
+            player_names = [p.name for p in self.engine.players]
+            roles = [p.role for p in self.engine.players]
             for player in self.engine.players:
+                # Role information is now built through the Boolean rule helper.
                 await self.send_to(
                     player.player_id,
                     message(
                         "role_info",
                         role=player.role.value if player.role else None,
                         alignment=player.alignment.value if player.role else None,
-                        private_lines=self.engine.private_role_lines_for(player.player_id),
+                        private_lines=private_role_lines(
+                            player.player_id,
+                            player_names,
+                            roles,
+                        ),
                     ),
                 )
 
