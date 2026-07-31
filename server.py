@@ -8,6 +8,7 @@ from avalon.game.models import Alignment, AvalonError, GamePhase
 from avalon.networking.json_stream import receive_json, send_json
 from avalon.networking.messages import error, message
 from avalon.protocols.mission_voting.gmw import GMWMissionVotingProtocol
+from avalon.protocols.role_assignment.mental_poker import deal_roles_with_mental_poker
 from avalon.protocols.role_assignment.role_information import private_role_lines
 from avalon.protocols.role_assignment.trusted import TrustedRoleAssignmentProtocol
 
@@ -28,14 +29,17 @@ class PlayerConnection:
 
 
 class GameServer:
-    def __init__(self, host, port, expected_players, seed=None, rsa_key_size=2048):
+    def __init__(self, host, port, expected_players, seed=None, rsa_key_size=2048, role_protocol="trusted"):
         if expected_players < 5 or expected_players > 10:
             raise ValueError("--players must be between 5 and 10")
+        if role_protocol not in {"trusted", "mental-poker"}:
+            raise ValueError("--role-protocol must be trusted or mental-poker")
         self.host = host
         self.port = port
         self.expected_players = expected_players
         self.seed = seed
         self.rsa_key_size = rsa_key_size
+        self.role_protocol = role_protocol
 
         self.players = {}
         self._join_lock = asyncio.Lock()
@@ -161,11 +165,9 @@ class GameServer:
             )
             await self.broadcast(message("game_started", players=self.engine.public_dict()["players"]))
 
-            # Current role assignment is trusted. Server shuffles roles here.
-            # Later this part can be replaced by a secure role assignment module.
+            # Role assignment happens before normal Avalon rounds begin.
             self.engine.set_phase(GamePhase.TRUSTED_ROLE_ASSIGNMENT)
-            role_protocol = TrustedRoleAssignmentProtocol(self.engine.rng)
-            self.engine.set_roles(role_protocol.assign_roles(len(ordered)))
+            self.engine.set_roles(self._assign_roles(len(ordered)))
             player_names = [p.name for p in self.engine.players]
             roles = [p.role for p in self.engine.players]
             for player in self.engine.players:
@@ -174,6 +176,7 @@ class GameServer:
                     player.player_id,
                     message(
                         "role_info",
+                        role_protocol=self.role_protocol,
                         role=player.role.value if player.role else None,
                         alignment=player.alignment.value if player.role else None,
                         private_lines=private_role_lines(
@@ -208,6 +211,20 @@ class GameServer:
             print(f"Game aborted: {exc}")
         finally:
             self._done.set()
+
+    def _assign_roles(self, player_count):
+        # Default path keeps the old trusted server shuffle.
+        if self.role_protocol == "trusted":
+            role_protocol = TrustedRoleAssignmentProtocol(self.engine.rng)
+            return role_protocol.assign_roles(player_count)
+
+        # This path uses the Mental Poker prototype added for secure dealing.
+        # It is still local here; later commits can move the steps to clients.
+        deal_result = deal_roles_with_mental_poker(
+            player_count,
+            rng=self.engine.rng,
+        )
+        return deal_result.player_roles()
 
     async def _run_team_proposal(self):
         assert self.engine is not None
@@ -511,6 +528,7 @@ async def async_main(args):
         expected_players=args.players,
         seed=args.seed,
         rsa_key_size=args.rsa_key_size,
+        role_protocol=args.role_protocol,
     )
     await server.serve()
 
@@ -522,6 +540,12 @@ def main():
     parser.add_argument("--players", type=int, required=True)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--rsa-key-size", type=int, default=2048)
+    parser.add_argument(
+        "--role-protocol",
+        choices=("trusted", "mental-poker"),
+        default="trusted",
+        help="role assignment method used before the game starts",
+    )
     args = parser.parse_args()
     try:
         asyncio.run(async_main(args))
