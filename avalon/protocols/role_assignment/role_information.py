@@ -92,13 +92,26 @@ def private_role_lines(player_id, player_names, roles):
     # Same display rule as the current trusted engine, but based on Boolean visibility.
     roles = _clean_roles(roles)
     info = role_information_for_viewer(player_id, roles)
-    lines = [f"You are {info.role.value} ({info.alignment.value})."]
-    if info.role == Role.MERLIN:
-        visible = _format_player_list(info.visible_evil_player_ids, player_names)
+    return private_role_lines_from_visible(
+        player_id=player_id,
+        player_names=player_names,
+        role=info.role,
+        visible_evil_player_ids=info.visible_evil_player_ids,
+    )
+
+
+def private_role_lines_from_visible(player_id, player_names, role, visible_evil_player_ids):
+    # Same text format, but caller already computed the visible evil list.
+    role = _clean_role(role)
+    visible_evil_player_ids = list(visible_evil_player_ids)
+    alignment = role.alignment
+    lines = [f"You are {role.value} ({alignment.value})."]
+    if role == Role.MERLIN:
+        visible = _format_player_list(visible_evil_player_ids, player_names)
         lines.append(f"Merlin information: Evil players are {visible}.")
-    elif info.alignment == Alignment.EVIL:
-        if info.visible_evil_player_ids:
-            visible = _format_player_list(info.visible_evil_player_ids, player_names)
+    elif alignment == Alignment.EVIL:
+        if visible_evil_player_ids:
+            visible = _format_player_list(visible_evil_player_ids, player_names)
             lines.append("Evil information: Other evil players are " + visible + ".")
         else:
             lines.append("Evil information: You are the only evil player.")

@@ -234,3 +234,31 @@ class GMWParty:
         for payload in received.values():
             result ^= _validate_bit(int(payload["share"]), name="output share")
         return result
+
+    async def reveal_to_party(self, output_share, output_name, target_party_id):
+        # Reveal one shared bit only to one party.
+        # This is useful for private role information.
+        self._require_started()
+        output_share = _validate_bit(output_share, name="output share")
+        target_party_id = int(target_party_id)
+        if not 0 <= target_party_id < self.party_count:
+            raise ValueError("invalid target party id")
+
+        tag = f"{self.session_id}:private-output:{output_name}:target:{target_party_id}"
+        if self.party_id == target_party_id:
+            received = await self.network.receive_from_all(
+                expected_type="private_output_share",
+                expected_tag=tag,
+            )
+            result = output_share
+            for payload in received.values():
+                result ^= _validate_bit(int(payload["share"]), name="output share")
+            return result
+
+        await self.network.send(
+            target_party_id,
+            message_type="private_output_share",
+            tag=tag,
+            payload={"share": output_share},
+        )
+        return None

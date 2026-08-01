@@ -170,22 +170,26 @@ class GameServer:
             self.engine.set_roles(await self._assign_roles(len(ordered)))
             player_names = [p.name for p in self.engine.players]
             roles = [p.role for p in self.engine.players]
-            for player in self.engine.players:
-                # Role information is now built through the Boolean rule helper.
-                await self.send_to(
-                    player.player_id,
-                    message(
-                        "role_info",
-                        role_protocol=self.role_protocol,
-                        role=player.role.value if player.role else None,
-                        alignment=player.alignment.value if player.role else None,
-                        private_lines=private_role_lines(
-                            player.player_id,
-                            player_names,
-                            roles,
+            if self.role_protocol == "trusted":
+                for player in self.engine.players:
+                    # Trusted mode still sends role information from server.
+                    await self.send_to(
+                        player.player_id,
+                        message(
+                            "role_info",
+                            role_protocol=self.role_protocol,
+                            role=player.role.value if player.role else None,
+                            alignment=player.alignment.value if player.role else None,
+                            private_lines=private_role_lines(
+                                player.player_id,
+                                player_names,
+                                roles,
+                            ),
                         ),
-                    ),
-                )
+                    )
+            else:
+                # Mental Poker clients already printed their own private lines.
+                await self.broadcast(message("secure_role_information_complete"))
 
             self.engine.set_phase(GamePhase.TEAM_PROPOSAL)
             await self.broadcast_state()
@@ -241,6 +245,8 @@ class GameServer:
                 session_id=session_id,
                 party_player_ids=party_player_ids,
                 endpoints=endpoints,
+                player_names=[self.engine.players[player_id].name for player_id in party_player_ids],
+                rsa_key_size=self.rsa_key_size,
             )
         )
 

@@ -12,6 +12,9 @@ from avalon.protocols.mission_voting.secure_vote.protocol import (
 from avalon.protocols.role_assignment.network_mental_poker import (
     run_network_mental_poker_role_assignment,
 )
+from avalon.protocols.role_assignment.secure_role_information import (
+    run_secure_role_information,
+)
 
 
 # The client is one player's terminal program.
@@ -226,6 +229,8 @@ class AvalonClient:
             print(f"Server error: {incoming.get('message')}")
         elif message_type == "role_assignment_result_recorded":
             print("Secure role assignment result recorded.")
+        elif message_type == "secure_role_information_complete":
+            print("Secure role information complete.")
         elif message_type == "game_aborted":
             raise RuntimeError(f"Game aborted: {incoming.get('message')}")
         elif message_type == "game_over":
@@ -284,25 +289,42 @@ class AvalonClient:
         session_id = str(incoming["session_id"])
 
         print("Secure role assignment is running.")
-        result = await run_network_mental_poker_role_assignment(
+        role_result = await run_network_mental_poker_role_assignment(
             party_id=party_id,
             endpoints=endpoints,
             listen_host=self.listen_host,
             session_id=session_id,
             connect_timeout=self.mpc_timeout,
         )
-        self.role = result.role
-        self.alignment = result.role.alignment
+        self.role = role_result.role
+        self.alignment = role_result.role.alignment
+
+        # After dealing, role information is computed as private Boolean outputs.
+        info_result = await run_secure_role_information(
+            party_id=party_id,
+            endpoints=endpoints,
+            listen_host=self.listen_host,
+            session_id=session_id + ":role-info",
+            local_role=self.role,
+            player_names=[str(value) for value in incoming["player_names"]],
+            rsa_key_size=int(incoming["rsa_key_size"]),
+            connect_timeout=self.mpc_timeout,
+        )
+        print("\nPrivate role information")
+        print("-" * 40)
+        for line in info_result.private_lines:
+            print(line)
+        print("-" * 40)
 
         # The current server still records roles so the old game flow can continue.
         # Later this can be replaced by hidden-role assassination logic.
         await self._send(
             message(
                 "role_assignment_result",
-                session_id=result.session_id,
-                role=result.role.value,
-                card_id=result.card.card_id,
-                card_label=result.card.label,
+                session_id=role_result.session_id,
+                role=role_result.role.value,
+                card_id=role_result.card.card_id,
+                card_label=role_result.card.label,
             )
         )
 
