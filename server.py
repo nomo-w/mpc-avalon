@@ -50,6 +50,7 @@ class GameServer:
         self.engine = None
         self.mission_voting = GMWMissionVotingProtocol(self)
         self.plaintext_mission_vote_messages_seen = 0
+        self.final_role_reveals = {}
 
     async def serve(self):
         # Start the public TCP server. Clients connect here first.
@@ -167,10 +168,12 @@ class GameServer:
 
             # Role assignment happens before normal Avalon rounds begin.
             self.engine.set_phase(GamePhase.TRUSTED_ROLE_ASSIGNMENT)
-            self.engine.set_roles(await self._assign_roles(len(ordered)))
+            assigned_roles = await self._assign_roles(len(ordered))
+            if assigned_roles is not None:
+                self.engine.set_roles(assigned_roles)
             player_names = [p.name for p in self.engine.players]
-            roles = [p.role for p in self.engine.players]
             if self.role_protocol == "trusted":
+                roles = [p.role for p in self.engine.players]
                 for player in self.engine.players:
                     # Trusted mode still sends role information from server.
                     await self.send_to(
@@ -223,7 +226,8 @@ class GameServer:
             return role_protocol.assign_roles(player_count)
 
         # Mental Poker now runs between clients.
-        return await self._coordinate_mental_poker_role_assignment(player_count)
+        await self._coordinate_mental_poker_role_assignment(player_count)
+        return None
 
     async def _coordinate_mental_poker_role_assignment(self, player_count):
         session_id = f"game-{secrets.token_hex(4)}-role-assignment"
@@ -250,28 +254,22 @@ class GameServer:
             )
         )
 
-        role_results = {}
-        while len(role_results) < player_count:
+        done_players = set()
+        while len(done_players) < player_count:
             player_id, incoming = await self._next_message()
             try:
                 if incoming.get("type") == "disconnect":
                     raise ConnectionError(incoming["message"])
-                if incoming.get("type") != "role_assignment_result":
-                    raise AvalonError("Expected a role_assignment_result message.")
+                if incoming.get("type") != "role_assignment_done":
+                    raise AvalonError("Expected a role_assignment_done message.")
                 if str(incoming.get("session_id", "")) != session_id:
-                    raise AvalonError("Role assignment result used the wrong session ID.")
-                if player_id in role_results:
-                    raise AvalonError("You already submitted your role assignment result.")
-                role_results[player_id] = Role(str(incoming.get("role")))
-                await self.send_to(player_id, message("role_assignment_result_recorded"))
-            except ValueError as exc:
-                await self.send_to(player_id, error(str(exc)))
+                    raise AvalonError("Role assignment done message used the wrong session ID.")
+                if player_id in done_players:
+                    raise AvalonError("You already submitted role assignment done.")
+                done_players.add(player_id)
+                await self.send_to(player_id, message("role_assignment_done_recorded"))
             except AvalonError as exc:
                 await self.send_to(player_id, error(str(exc)))
-
-        roles = [role_results[player_id] for player_id in party_player_ids]
-        self._check_role_set_matches_rules(roles)
-        return roles
 
     def _check_role_set_matches_rules(self, roles):
         expected = sorted(role.value for role in build_roles(len(roles)))
@@ -528,7 +526,14 @@ class GameServer:
                 if incoming.get("type") != "assassination_target":
                     raise AvalonError("Expected an assassination_target message.")
                 target_id = int(incoming.get("target_id"))
-                winner = self.engine.resolve_assassination(player_id, target_id)
+                if self.role_protocol == "mental-poker":
+                    target_is_merlin = await self._ask_target_is_merlin(player_id, target_id)
+                    winner = self.engine.resolve_assassination_from_hidden_check(
+                        target_id=target_id,
+                        target_is_merlin=target_is_merlin,
+                    )
+                else:
+                    winner = self.engine.resolve_assassination(player_id, target_id)
                 await self.broadcast(
                     message(
                         "assassination_result",
@@ -541,16 +546,90 @@ class GameServer:
             except AvalonError as exc:
                 await self.send_to(player_id, error(str(exc)))
 
+    async def _ask_target_is_merlin(self, assassin_id, target_id):
+        assert self.engine is not None
+        if not 0 <= target_id < len(self.engine.players):
+            raise AvalonError("Invalid assassination target.")
+
+        # In Mental Poker mode server does not know which player is Merlin.
+        # The selected target only reveals this one Boolean bit at the end.
+        await self.send_to(
+            target_id,
+            message(
+                "check_assassination_target",
+                assassin_id=assassin_id,
+                target_id=target_id,
+            ),
+        )
+        while True:
+            player_id, incoming = await self._next_message()
+            try:
+                if incoming.get("type") == "disconnect":
+                    raise ConnectionError(incoming["message"])
+                if incoming.get("type") != "assassination_target_check":
+                    raise AvalonError("Expected an assassination_target_check message.")
+                if player_id != target_id:
+                    raise AvalonError("Only the assassination target can answer this check.")
+                if int(incoming.get("target_id")) != target_id:
+                    raise AvalonError("Assassination target check used the wrong target ID.")
+                return bool(incoming.get("is_merlin"))
+            except AvalonError as exc:
+                await self.send_to(player_id, error(str(exc)))
+
     async def _broadcast_game_over(self):
         assert self.engine is not None
+        if self.role_protocol == "mental-poker":
+            roles = await self._collect_final_role_reveals()
+        else:
+            roles = self.engine.reveal_roles()
         await self.broadcast(
             message(
                 "game_over",
                 winner=self.engine.winner.value if self.engine.winner else None,
-                roles=self.engine.reveal_roles(),
+                roles=roles,
                 plaintext_mission_vote_messages_seen=self.plaintext_mission_vote_messages_seen,
             )
         )
+
+    async def _collect_final_role_reveals(self):
+        assert self.engine is not None
+        self.final_role_reveals.clear()
+        await self.broadcast(message("request_final_role_reveal"))
+        while len(self.final_role_reveals) < len(self.engine.players):
+            player_id, incoming = await self._next_message()
+            try:
+                if incoming.get("type") == "disconnect":
+                    raise ConnectionError(incoming["message"])
+                if incoming.get("type") != "final_role_reveal":
+                    raise AvalonError("Expected a final_role_reveal message.")
+                if player_id in self.final_role_reveals:
+                    raise AvalonError("You already revealed your final role.")
+                role = Role(str(incoming.get("role")))
+                self.final_role_reveals[player_id] = role
+                await self.send_to(player_id, message("final_role_reveal_recorded"))
+            except ValueError as exc:
+                await self.send_to(player_id, error(str(exc)))
+            except AvalonError as exc:
+                await self.send_to(player_id, error(str(exc)))
+
+        roles = [
+            self.final_role_reveals[player_id]
+            for player_id in range(len(self.engine.players))
+        ]
+        self._check_role_set_matches_rules(roles)
+        return self._role_reveal_dicts(roles)
+
+    def _role_reveal_dicts(self, roles):
+        assert self.engine is not None
+        return [
+            {
+                "player_id": player_id,
+                "name": self.engine.players[player_id].name,
+                "role": role.value,
+                "alignment": role.alignment.value,
+            }
+            for player_id, role in enumerate(roles)
+        ]
 
     async def _next_message(self):
         player_id, incoming = await self._incoming.get()

@@ -223,12 +223,18 @@ class AvalonClient:
                 f"Assassin chose Player {incoming['target_id']}. "
                 f"Winner: {incoming['winner']}."
             )
+        elif message_type == "check_assassination_target":
+            await self._send_assassination_target_check(incoming)
+        elif message_type == "request_final_role_reveal":
+            await self._send_final_role_reveal()
         elif message_type == "action_required":
             await self._handle_action(incoming)
         elif message_type == "error":
             print(f"Server error: {incoming.get('message')}")
-        elif message_type == "role_assignment_result_recorded":
-            print("Secure role assignment result recorded.")
+        elif message_type == "role_assignment_done_recorded":
+            print("Secure role assignment complete.")
+        elif message_type == "final_role_reveal_recorded":
+            print("Final role reveal recorded.")
         elif message_type == "secure_role_information_complete":
             print("Secure role information complete.")
         elif message_type == "game_aborted":
@@ -316,15 +322,42 @@ class AvalonClient:
             print(line)
         print("-" * 40)
 
-        # The current server still records roles so the old game flow can continue.
-        # Later this can be replaced by hidden-role assassination logic.
+        # Tell server the secure role assignment finished.
+        # Do not send the role here, because server should not know it now.
         await self._send(
             message(
-                "role_assignment_result",
+                "role_assignment_done",
                 session_id=role_result.session_id,
-                role=role_result.role.value,
-                card_id=role_result.card.card_id,
-                card_label=role_result.card.label,
+            )
+        )
+
+    async def _send_assassination_target_check(self, incoming):
+        # The selected target reveals only whether it is Merlin.
+        # This is enough to decide the assassination result.
+        if self.player_id is None:
+            raise RuntimeError("Client has not received a player ID.")
+        if self.role is None:
+            raise RuntimeError("Client has not received role information.")
+        target_id = int(incoming["target_id"])
+        if target_id != self.player_id:
+            return
+        await self._send(
+            message(
+                "assassination_target_check",
+                target_id=target_id,
+                is_merlin=(self.role == Role.MERLIN),
+            )
+        )
+
+    async def _send_final_role_reveal(self):
+        # Roles are public at game over, so now client can reveal it.
+        if self.role is None:
+            raise RuntimeError("Client has not received role information.")
+        await self._send(
+            message(
+                "final_role_reveal",
+                role=self.role.value,
+                alignment=self.role.alignment.value,
             )
         )
 

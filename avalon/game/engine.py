@@ -252,6 +252,19 @@ class AvalonEngine:
         assert self.winner is not None
         return self.winner
 
+    def resolve_assassination_from_hidden_check(self, target_id, target_is_merlin):
+        # Used when server does not know the full role table.
+        # The selected target only says whether it is Merlin.
+        self.require_phase(GamePhase.ASSASSINATION)
+        if not 0 <= target_id < len(self.players):
+            raise AvalonError("Invalid assassination target.")
+        if bool(target_is_merlin):
+            self.finish(Alignment.EVIL)
+        else:
+            self.finish(Alignment.GOOD)
+        assert self.winner is not None
+        return self.winner
+
     def finish(self, winner):
         self.game_over = True
         self.winner = winner
