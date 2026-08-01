@@ -211,7 +211,10 @@ class AvalonClient:
                 else "Mission succeeded."
             )
         elif message_type == "assassination_started":
-            print(f"Assassination phase. Assassin is Player {incoming['assassin_id']}.")
+            if incoming.get("assassin_hidden"):
+                print("Assassination phase. Waiting for the Assassin.")
+            else:
+                print(f"Assassination phase. Assassin is Player {incoming['assassin_id']}.")
         elif message_type == "assassination_result":
             print(
                 f"Assassin chose Player {incoming['target_id']}. "
@@ -254,6 +257,13 @@ class AvalonClient:
         elif action == "assassinate":
             target_id = await self.input_provider.assassination_target(self.state)
             await self._send(message("assassination_target", target_id=target_id))
+        elif action == "assassinate_if_assassin":
+            # In Mental Poker mode, only the local Assassin should act.
+            if self.role == Role.ASSASSIN:
+                target_id = await self.input_provider.assassination_target(self.state)
+                await self._send(message("assassination_target", target_id=target_id))
+            else:
+                print("Waiting for the Assassin to choose a target.")
 
     async def _run_secure_role_assignment(self, incoming):
         # Mental Poker role assignment runs between all players.

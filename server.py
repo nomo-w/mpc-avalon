@@ -498,14 +498,22 @@ class GameServer:
 
     async def _run_assassination(self):
         assert self.engine is not None
-        assassin_id = self.engine.assassin().player_id
-        # If Good gets three successful missions, Assassin may guess Merlin.
         await self.broadcast_state()
-        await self.broadcast(message("assassination_started", assassin_id=assassin_id))
-        await self.send_to(
-            assassin_id,
-            message("action_required", action="assassinate"),
-        )
+
+        # If Good gets three successful missions, Assassin may guess Merlin.
+        if self.role_protocol == "mental-poker":
+            # Mental Poker clients know their own roles locally.
+            # Server does not need to tell everyone who the Assassin is here.
+            await self.broadcast(message("assassination_started", assassin_hidden=True))
+            await self.broadcast(message("action_required", action="assassinate_if_assassin"))
+        else:
+            # Trusted mode keeps the old direct server prompt.
+            assassin_id = self.engine.assassin().player_id
+            await self.broadcast(message("assassination_started", assassin_id=assassin_id))
+            await self.send_to(
+                assassin_id,
+                message("action_required", action="assassinate"),
+            )
         while True:
             player_id, incoming = await self._next_message()
             try:
