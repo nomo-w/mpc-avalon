@@ -9,6 +9,9 @@ from avalon.protocols.mission_voting.secure_vote.protocol import (
     MissionVoteConfiguration,
     run_secure_mission_vote,
 )
+from avalon.protocols.role_assignment.network_mental_poker import (
+    run_network_mental_poker_role_assignment,
+)
 
 
 # The client is one player's terminal program.
@@ -195,6 +198,8 @@ class AvalonClient:
             )
             if self.player_id not in {int(value) for value in incoming["team_player_ids"]}:
                 print("Secure mission vote is preparing; not on this mission.")
+        elif message_type == "start_secure_role_assignment":
+            await self._run_secure_role_assignment(incoming)
         elif message_type == "prepare_secure_mission_vote":
             await self._prepare_secure_mission_vote(incoming)
         elif message_type == "start_secure_mission_vote":
@@ -216,6 +221,8 @@ class AvalonClient:
             await self._handle_action(incoming)
         elif message_type == "error":
             print(f"Server error: {incoming.get('message')}")
+        elif message_type == "role_assignment_result_recorded":
+            print("Secure role assignment result recorded.")
         elif message_type == "game_aborted":
             raise RuntimeError(f"Game aborted: {incoming.get('message')}")
         elif message_type == "game_over":
@@ -247,6 +254,47 @@ class AvalonClient:
         elif action == "assassinate":
             target_id = await self.input_provider.assassination_target(self.state)
             await self._send(message("assassination_target", target_id=target_id))
+
+    async def _run_secure_role_assignment(self, incoming):
+        # Mental Poker role assignment runs between all players.
+        # The server only starts the session and gives peer addresses.
+        if self.player_id is None:
+            raise RuntimeError("Client has not received a player ID.")
+        if incoming.get("protocol") != "avalon-mental-poker-v1":
+            raise RuntimeError("Server requested an unsupported role protocol.")
+
+        party_player_ids = [int(value) for value in incoming["party_player_ids"]]
+        if self.player_id not in party_player_ids:
+            return
+        party_id = party_player_ids.index(self.player_id)
+        endpoints = [
+            PartyEndpoint(str(item["host"]), int(item["port"]))
+            for item in incoming["endpoints"]
+        ]
+        session_id = str(incoming["session_id"])
+
+        print("Secure role assignment is running.")
+        result = await run_network_mental_poker_role_assignment(
+            party_id=party_id,
+            endpoints=endpoints,
+            listen_host=self.listen_host,
+            session_id=session_id,
+            connect_timeout=self.mpc_timeout,
+        )
+        self.role = result.role
+        self.alignment = result.role.alignment
+
+        # The current server still records roles so the old game flow can continue.
+        # Later this can be replaced by hidden-role assassination logic.
+        await self._send(
+            message(
+                "role_assignment_result",
+                session_id=result.session_id,
+                role=result.role.value,
+                card_id=result.card.card_id,
+                card_label=result.card.label,
+            )
+        )
 
     async def _run_secure_mission_vote(self, incoming):
         # This is the real secure voting part.

@@ -4,11 +4,11 @@ import contextlib
 import secrets
 
 from avalon.game.engine import AvalonEngine
-from avalon.game.models import Alignment, AvalonError, GamePhase
+from avalon.game.models import AvalonError, GamePhase, Role
+from avalon.game.rules import build_roles
 from avalon.networking.json_stream import receive_json, send_json
 from avalon.networking.messages import error, message
 from avalon.protocols.mission_voting.gmw import GMWMissionVotingProtocol
-from avalon.protocols.role_assignment.mental_poker import deal_roles_with_mental_poker
 from avalon.protocols.role_assignment.role_information import private_role_lines
 from avalon.protocols.role_assignment.trusted import TrustedRoleAssignmentProtocol
 
@@ -167,7 +167,7 @@ class GameServer:
 
             # Role assignment happens before normal Avalon rounds begin.
             self.engine.set_phase(GamePhase.TRUSTED_ROLE_ASSIGNMENT)
-            self.engine.set_roles(self._assign_roles(len(ordered)))
+            self.engine.set_roles(await self._assign_roles(len(ordered)))
             player_names = [p.name for p in self.engine.players]
             roles = [p.role for p in self.engine.players]
             for player in self.engine.players:
@@ -212,19 +212,66 @@ class GameServer:
         finally:
             self._done.set()
 
-    def _assign_roles(self, player_count):
+    async def _assign_roles(self, player_count):
         # Default path keeps the old trusted server shuffle.
         if self.role_protocol == "trusted":
             role_protocol = TrustedRoleAssignmentProtocol(self.engine.rng)
             return role_protocol.assign_roles(player_count)
 
-        # This path uses the Mental Poker prototype added for secure dealing.
-        # It is still local here; later commits can move the steps to clients.
-        deal_result = deal_roles_with_mental_poker(
-            player_count,
-            rng=self.engine.rng,
+        # Mental Poker now runs between clients.
+        return await self._coordinate_mental_poker_role_assignment(player_count)
+
+    async def _coordinate_mental_poker_role_assignment(self, player_count):
+        session_id = f"game-{secrets.token_hex(4)}-role-assignment"
+        party_player_ids = list(range(player_count))
+        endpoints = [
+            {
+                "host": self.engine.players[player_id].mpc_host,
+                "port": self.engine.players[player_id].mpc_port,
+            }
+            for player_id in party_player_ids
+        ]
+
+        # Server sends public peer addresses to all clients.
+        # The clients do the encrypted dealing between themselves.
+        await self.broadcast(
+            message(
+                "start_secure_role_assignment",
+                protocol="avalon-mental-poker-v1",
+                session_id=session_id,
+                party_player_ids=party_player_ids,
+                endpoints=endpoints,
+            )
         )
-        return deal_result.player_roles()
+
+        role_results = {}
+        while len(role_results) < player_count:
+            player_id, incoming = await self._next_message()
+            try:
+                if incoming.get("type") == "disconnect":
+                    raise ConnectionError(incoming["message"])
+                if incoming.get("type") != "role_assignment_result":
+                    raise AvalonError("Expected a role_assignment_result message.")
+                if str(incoming.get("session_id", "")) != session_id:
+                    raise AvalonError("Role assignment result used the wrong session ID.")
+                if player_id in role_results:
+                    raise AvalonError("You already submitted your role assignment result.")
+                role_results[player_id] = Role(str(incoming.get("role")))
+                await self.send_to(player_id, message("role_assignment_result_recorded"))
+            except ValueError as exc:
+                await self.send_to(player_id, error(str(exc)))
+            except AvalonError as exc:
+                await self.send_to(player_id, error(str(exc)))
+
+        roles = [role_results[player_id] for player_id in party_player_ids]
+        self._check_role_set_matches_rules(roles)
+        return roles
+
+    def _check_role_set_matches_rules(self, roles):
+        expected = sorted(role.value for role in build_roles(len(roles)))
+        actual = sorted(role.value for role in roles)
+        if actual != expected:
+            raise AvalonError("Mental Poker role assignment produced invalid roles.")
 
     async def _run_team_proposal(self):
         assert self.engine is not None
