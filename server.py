@@ -226,6 +226,7 @@ class GameServer:
             return role_protocol.assign_roles(player_count)
 
         # Mental Poker now runs between clients.
+        # It returns None because server should not learn the role list.
         await self._coordinate_mental_poker_role_assignment(player_count)
         return None
 
@@ -272,6 +273,7 @@ class GameServer:
                 await self.send_to(player_id, error(str(exc)))
 
     def _check_role_set_matches_rules(self, roles):
+        # Used only when roles are finally opened at game over.
         expected = sorted(role.value for role in build_roles(len(roles)))
         actual = sorted(role.value for role in roles)
         if actual != expected:
@@ -508,6 +510,7 @@ class GameServer:
         if self.role_protocol == "mental-poker":
             # Mental Poker clients know their own roles locally.
             # Server does not need to tell everyone who the Assassin is here.
+            # Under semi-honest behaviour, only the real Assassin will answer.
             await self.broadcast(message("assassination_started", assassin_hidden=True))
             await self.broadcast(message("action_required", action="assassinate_if_assassin"))
         else:
