@@ -1,11 +1,8 @@
-import random
-
 from .models import (
     Alignment,
     AvalonError,
     GamePhase,
     Player,
-    Role,
     STANDARD_CONFIGS,
 )
 
@@ -31,9 +28,8 @@ class PublicSnapshot:
 
 
 class AvalonEngine:
-    def __init__(self, player_names, seed=None, mpc_endpoints=None):
+    def __init__(self, player_names, mpc_endpoints=None):
         self.player_names = player_names
-        self.seed = seed
         self.mpc_endpoints = mpc_endpoints
         self.phase = GamePhase.LOBBY
         self.leader_id = 0
@@ -61,7 +57,6 @@ class AvalonEngine:
             Player(i, name, mpc_host=endpoints[i][0], mpc_port=endpoints[i][1])
             for i, name in enumerate(names)
         ]
-        self.rng = random.Random(self.seed)
 
     @property
     def current_mission_number(self):
@@ -88,51 +83,6 @@ class AvalonEngine:
         if self.game_over and phase != GamePhase.GAME_OVER:
             raise AvalonError("The game is already over.")
         self.phase = phase
-
-    def set_roles(self, roles):
-        if len(roles) != len(self.players):
-            raise AvalonError("Role count does not match player count.")
-        for player, role in zip(self.players, roles):
-            player.role = role
-
-    def evil_players(self):
-        return [player for player in self.players if player.is_evil]
-
-    def merlin(self):
-        merlins = [player for player in self.players if player.role == Role.MERLIN]
-        if len(merlins) != 1:
-            raise AvalonError("There should be exactly one Merlin.")
-        return merlins[0]
-
-    def assassin(self):
-        assassins = [player for player in self.players if player.role == Role.ASSASSIN]
-        if len(assassins) != 1:
-            raise AvalonError("There should be exactly one Assassin.")
-        return assassins[0]
-
-    def private_role_lines_for(self, player_id):
-        # Build private information shown only to one player.
-        # This is trusted role assignment version, so server knows it here.
-        player = self.players[player_id]
-        if player.role is None:
-            raise AvalonError("Roles have not been assigned yet.")
-        lines = [f"You are {player.role.value} ({player.alignment.value})."]
-        if player.role == Role.MERLIN:
-            evil = ", ".join(f"{p.player_id}:{p.name}" for p in self.evil_players())
-            lines.append(f"Merlin information: Evil players are {evil}.")
-        elif player.is_evil:
-            others = [
-                f"{p.player_id}:{p.name}"
-                for p in self.evil_players()
-                if p.player_id != player_id
-            ]
-            if others:
-                lines.append("Evil information: Other evil players are " + ", ".join(others) + ".")
-            else:
-                lines.append("Evil information: You are the only evil player.")
-        else:
-            lines.append("You have no additional information.")
-        return lines
 
     def validate_team(self, team_ids):
         # Check leader selected correct number of different players.
@@ -238,20 +188,6 @@ class AvalonEngine:
         self.advance_leader()
         self.set_phase(GamePhase.TEAM_PROPOSAL)
 
-    def resolve_assassination(self, actor_id, target_id):
-        # Good side needs Merlin to survive the final assassination.
-        self.require_phase(GamePhase.ASSASSINATION)
-        if actor_id != self.assassin().player_id:
-            raise AvalonError("Only the Assassin can choose the assassination target.")
-        if not 0 <= target_id < len(self.players):
-            raise AvalonError("Invalid assassination target.")
-        if self.players[target_id].role == Role.MERLIN:
-            self.finish(Alignment.EVIL)
-        else:
-            self.finish(Alignment.GOOD)
-        assert self.winner is not None
-        return self.winner
-
     def resolve_assassination_from_hidden_check(self, target_id, target_is_merlin):
         # Used when server does not know the full role table.
         # The selected target only says whether it is Merlin.
@@ -294,14 +230,3 @@ class AvalonEngine:
 
     def public_dict(self):
         return self.public_snapshot().__dict__
-
-    def reveal_roles(self):
-        return [
-            {
-                "player_id": player.player_id,
-                "name": player.name,
-                "role": player.role.value if player.role else None,
-                "alignment": player.alignment.value if player.role else None,
-            }
-            for player in self.players
-        ]

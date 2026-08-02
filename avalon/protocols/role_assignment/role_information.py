@@ -89,7 +89,7 @@ def role_information_for_all(roles):
 
 
 def private_role_lines(player_id, player_names, roles):
-    # Same display rule as the current trusted engine, but based on Boolean visibility.
+    # Helper for tests or local checks when all roles are already known.
     roles = _clean_roles(roles)
     info = role_information_for_viewer(player_id, roles)
     return private_role_lines_from_visible(

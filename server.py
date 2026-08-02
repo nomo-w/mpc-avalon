@@ -9,8 +9,6 @@ from avalon.game.rules import build_roles
 from avalon.networking.json_stream import receive_json, send_json
 from avalon.networking.messages import error, message
 from avalon.protocols.mission_voting.gmw import GMWMissionVotingProtocol
-from avalon.protocols.role_assignment.role_information import private_role_lines
-from avalon.protocols.role_assignment.trusted import TrustedRoleAssignmentProtocol
 
 
 # The server is the public judge of this game.
@@ -29,17 +27,13 @@ class PlayerConnection:
 
 
 class GameServer:
-    def __init__(self, host, port, expected_players, seed=None, rsa_key_size=2048, role_protocol="trusted"):
+    def __init__(self, host, port, expected_players, rsa_key_size=2048):
         if expected_players < 5 or expected_players > 10:
             raise ValueError("--players must be between 5 and 10")
-        if role_protocol not in {"trusted", "mental-poker"}:
-            raise ValueError("--role-protocol must be trusted or mental-poker")
         self.host = host
         self.port = port
         self.expected_players = expected_players
-        self.seed = seed
         self.rsa_key_size = rsa_key_size
-        self.role_protocol = role_protocol
 
         self.players = {}
         self._join_lock = asyncio.Lock()
@@ -161,38 +155,15 @@ class GameServer:
             # AvalonEngine only contains game rules and public state.
             self.engine = AvalonEngine(
                 [player.name for player in ordered],
-                seed=self.seed,
                 mpc_endpoints=[(player.mpc_host, player.mpc_port) for player in ordered],
             )
             await self.broadcast(message("game_started", players=self.engine.public_dict()["players"]))
 
             # Role assignment happens before normal Avalon rounds begin.
-            self.engine.set_phase(GamePhase.TRUSTED_ROLE_ASSIGNMENT)
-            assigned_roles = await self._assign_roles(len(ordered))
-            if assigned_roles is not None:
-                self.engine.set_roles(assigned_roles)
-            player_names = [p.name for p in self.engine.players]
-            if self.role_protocol == "trusted":
-                roles = [p.role for p in self.engine.players]
-                for player in self.engine.players:
-                    # Trusted mode still sends role information from server.
-                    await self.send_to(
-                        player.player_id,
-                        message(
-                            "role_info",
-                            role_protocol=self.role_protocol,
-                            role=player.role.value if player.role else None,
-                            alignment=player.alignment.value if player.role else None,
-                            private_lines=private_role_lines(
-                                player.player_id,
-                                player_names,
-                                roles,
-                            ),
-                        ),
-                    )
-            else:
-                # Mental Poker clients already printed their own private lines.
-                await self.broadcast(message("secure_role_information_complete"))
+            self.engine.set_phase(GamePhase.SECURE_ROLE_ASSIGNMENT)
+            await self._assign_roles(len(ordered))
+            # Mental Poker clients already printed their own private lines.
+            await self.broadcast(message("secure_role_information_complete"))
 
             self.engine.set_phase(GamePhase.TEAM_PROPOSAL)
             await self.broadcast_state()
@@ -220,15 +191,9 @@ class GameServer:
             self._done.set()
 
     async def _assign_roles(self, player_count):
-        # Default path keeps the old trusted server shuffle.
-        if self.role_protocol == "trusted":
-            role_protocol = TrustedRoleAssignmentProtocol(self.engine.rng)
-            return role_protocol.assign_roles(player_count)
-
-        # Mental Poker now runs between clients.
-        # It returns None because server should not learn the role list.
+        # Mental Poker runs between clients.
+        # Server coordinates it, but does not learn the role list.
         await self._coordinate_mental_poker_role_assignment(player_count)
-        return None
 
     async def _coordinate_mental_poker_role_assignment(self, player_count):
         session_id = f"game-{secrets.token_hex(4)}-role-assignment"
@@ -507,20 +472,10 @@ class GameServer:
         await self.broadcast_state()
 
         # If Good gets three successful missions, Assassin may guess Merlin.
-        if self.role_protocol == "mental-poker":
-            # Mental Poker clients know their own roles locally.
-            # Server does not need to tell everyone who the Assassin is here.
-            # Under semi-honest behaviour, only the real Assassin will answer.
-            await self.broadcast(message("assassination_started", assassin_hidden=True))
-            await self.broadcast(message("action_required", action="assassinate_if_assassin"))
-        else:
-            # Trusted mode keeps the old direct server prompt.
-            assassin_id = self.engine.assassin().player_id
-            await self.broadcast(message("assassination_started", assassin_id=assassin_id))
-            await self.send_to(
-                assassin_id,
-                message("action_required", action="assassinate"),
-            )
+        # Server does not know who the Assassin is.
+        # Under semi-honest behaviour, only the real Assassin will answer.
+        await self.broadcast(message("assassination_started", assassin_hidden=True))
+        await self.broadcast(message("action_required", action="assassinate_if_assassin"))
         while True:
             player_id, incoming = await self._next_message()
             try:
@@ -529,14 +484,11 @@ class GameServer:
                 if incoming.get("type") != "assassination_target":
                     raise AvalonError("Expected an assassination_target message.")
                 target_id = int(incoming.get("target_id"))
-                if self.role_protocol == "mental-poker":
-                    target_is_merlin = await self._ask_target_is_merlin(player_id, target_id)
-                    winner = self.engine.resolve_assassination_from_hidden_check(
-                        target_id=target_id,
-                        target_is_merlin=target_is_merlin,
-                    )
-                else:
-                    winner = self.engine.resolve_assassination(player_id, target_id)
+                target_is_merlin = await self._ask_target_is_merlin(player_id, target_id)
+                winner = self.engine.resolve_assassination_from_hidden_check(
+                    target_id=target_id,
+                    target_is_merlin=target_is_merlin,
+                )
                 await self.broadcast(
                     message(
                         "assassination_result",
@@ -581,10 +533,7 @@ class GameServer:
 
     async def _broadcast_game_over(self):
         assert self.engine is not None
-        if self.role_protocol == "mental-poker":
-            roles = await self._collect_final_role_reveals()
-        else:
-            roles = self.engine.reveal_roles()
+        roles = await self._collect_final_role_reveals()
         await self.broadcast(
             message(
                 "game_over",
@@ -669,9 +618,7 @@ async def async_main(args):
         host=args.host,
         port=args.port,
         expected_players=args.players,
-        seed=args.seed,
         rsa_key_size=args.rsa_key_size,
-        role_protocol=args.role_protocol,
     )
     await server.serve()
 
@@ -681,14 +628,7 @@ def main():
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--players", type=int, required=True)
-    parser.add_argument("--seed", type=int)
     parser.add_argument("--rsa-key-size", type=int, default=2048)
-    parser.add_argument(
-        "--role-protocol",
-        choices=("trusted", "mental-poker"),
-        default="trusted",
-        help="role assignment method used before the game starts",
-    )
     args = parser.parse_args()
     try:
         asyncio.run(async_main(args))

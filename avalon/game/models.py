@@ -27,7 +27,7 @@ class Role(str, Enum):
 class GamePhase(str, Enum):
     # Main phases used by server and client display.
     LOBBY = "LOBBY"
-    TRUSTED_ROLE_ASSIGNMENT = "TRUSTED_ROLE_ASSIGNMENT"
+    SECURE_ROLE_ASSIGNMENT = "SECURE_ROLE_ASSIGNMENT"
     TEAM_PROPOSAL = "TEAM_PROPOSAL"
     TEAM_APPROVAL_VOTE = "TEAM_APPROVAL_VOTE"
     SECURE_MISSION_VOTE = "SECURE_MISSION_VOTE"

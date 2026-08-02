@@ -7,9 +7,7 @@
 - Roles: Merlin, Assassin, Minion of Mordred, Loyal Servant of Arthur.
 - One central game server for public state.
 - One command-line client per player.
-- Two role assignment modes:
-  - `trusted`: old server-side role shuffle, useful for debugging.
-  - `mental-poker`: secure role dealing between clients.
+- Secure role dealing between clients with Mental Poker.
 - Mission voting through custom GMW + OT by default.
 - `Success = 0`, `Fail = 1`.
 - Threshold 1 and threshold 2 mission rules.
@@ -27,7 +25,7 @@ Requires Python 3.11+.
 Open one terminal for the server:
 
 ```bash
-python server.py --host SERVER_IP --port SERVER_PORT --players NUMBER_OF_PLAYER --role-protocol mental-poker
+python server.py --host SERVER_IP --port SERVER_PORT --players NUMBER_OF_PLAYER
 ```
 
 Open five more terminals, using one unique MPC port per client:
@@ -47,7 +45,7 @@ Assume the server computer has IP `192.168.1.20`.
 Server:
 
 ```bash
-python server.py --host 0.0.0.0 --port 8765 --players 5 --role-protocol mental-poker
+python server.py --host 0.0.0.0 --port 8765 --players 5
 ```
 
 Each player runs one client on their own computer. `--advertise-host` must be
@@ -85,14 +83,9 @@ connections, but any player may be selected on a later mission.
 
 ## Secure Role Assignment
 
-The secure role assignment mode is enabled with:
-
-```bash
-python server.py --players 5 --role-protocol mental-poker
-```
-
-In this mode the server does not shuffle and send roles. It only gives every
-client the public player order and the peer-to-peer MPC addresses.
+Role assignment is always secure in the current version. The server does not
+shuffle and send roles. It only gives every client the public player order and
+the peer-to-peer MPC addresses.
 
 The role assignment flow is:
 
@@ -108,9 +101,9 @@ During the game, the role stays local inside each client. For example, a good
 client only submits Success for mission voting, and only the local Assassin
 answers the assassination prompt.
 
-At assassination time in `mental-poker` mode, the server still does not know
-Merlin's identity. The selected target only answers one Boolean question:
-`is_merlin`. This is enough to decide whether Good or Evil wins.
+At assassination time, the server still does not know Merlin's identity. The
+selected target only answers one Boolean question: `is_merlin`. This is enough
+to decide whether Good or Evil wins.
 
 At game over, roles are public in Avalon, so clients reveal their final roles
 for the final role table. The server checks that the revealed role multiset
@@ -129,7 +122,7 @@ avalon/protocols/role_assignment/secure_role_information.py
     GMW computation for Merlin/evil private information
 
 avalon/protocols/role_assignment/role_information.py
-    plain Boolean role-information rules used by trusted and secure modes
+    plain Boolean role-information rules used by the GMW role-info circuit
 
 avalon/protocols/mission_voting/secure_vote/gmw.py
     shared GMW runtime; role information uses reveal_to_party()
@@ -146,7 +139,7 @@ server.py                         central game server
 client.py                         one CLI client per player
 avalon/game/                      rules, roles, state machine validation
 avalon/networking/                newline-delimited JSON helpers
-avalon/protocols/role_assignment/ trusted and Mental Poker role assignment
+avalon/protocols/role_assignment/ Mental Poker role assignment and role info
 avalon/protocols/mission_voting/  mission voting interface and GMW adapter
 avalon/protocols/mission_voting/secure_vote/
                                   custom Boolean GMW + RSA-OT implementation

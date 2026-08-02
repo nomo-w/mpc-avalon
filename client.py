@@ -165,14 +165,6 @@ class AvalonClient:
             print(f"Lobby: {len(incoming.get('players', []))}/{incoming.get('players_expected')} players connected.")
         elif message_type == "game_started":
             print("Game started.")
-        elif message_type == "role_info":
-            self.role = Role(str(incoming["role"]))
-            self.alignment = Alignment(str(incoming["alignment"]))
-            print("\nPrivate role information")
-            print("-" * 40)
-            for line in incoming.get("private_lines", []):
-                print(line)
-            print("-" * 40)
         elif message_type == "public_state":
             self.state = dict(incoming["state"])
             # Server may send public state after several events.
@@ -214,10 +206,7 @@ class AvalonClient:
                 else "Mission succeeded."
             )
         elif message_type == "assassination_started":
-            if incoming.get("assassin_hidden"):
-                print("Assassination phase. Waiting for the Assassin.")
-            else:
-                print(f"Assassination phase. Assassin is Player {incoming['assassin_id']}.")
+            print("Assassination phase. Waiting for the Assassin.")
         elif message_type == "assassination_result":
             print(
                 f"Assassin chose Player {incoming['target_id']}. "
