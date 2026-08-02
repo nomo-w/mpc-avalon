@@ -27,13 +27,12 @@ class PlayerConnection:
 
 
 class GameServer:
-    def __init__(self, host, port, expected_players, rsa_key_size=2048):
+    def __init__(self, host, port, expected_players):
         if expected_players < 5 or expected_players > 10:
             raise ValueError("--players must be between 5 and 10")
         self.host = host
         self.port = port
         self.expected_players = expected_players
-        self.rsa_key_size = rsa_key_size
 
         self.players = {}
         self._join_lock = asyncio.Lock()
@@ -216,7 +215,6 @@ class GameServer:
                 party_player_ids=party_player_ids,
                 endpoints=endpoints,
                 player_names=[self.engine.players[player_id].name for player_id in party_player_ids],
-                rsa_key_size=self.rsa_key_size,
             )
         )
 
@@ -434,7 +432,6 @@ class GameServer:
                         party_player_ids=team_player_ids,
                         fail_threshold=fail_threshold,
                         endpoints=endpoints,
-                        rsa_key_size=self.rsa_key_size,
                     ),
                 )
                 for player_id in team_player_ids
@@ -618,7 +615,6 @@ async def async_main(args):
         host=args.host,
         port=args.port,
         expected_players=args.players,
-        rsa_key_size=args.rsa_key_size,
     )
     await server.serve()
 
@@ -628,7 +624,6 @@ def main():
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--players", type=int, required=True)
-    parser.add_argument("--rsa-key-size", type=int, default=2048)
     args = parser.parse_args()
     try:
         asyncio.run(async_main(args))

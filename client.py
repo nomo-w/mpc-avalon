@@ -302,7 +302,6 @@ class AvalonClient:
             session_id=session_id + ":role-info",
             local_role=self.role,
             player_names=[str(value) for value in incoming["player_names"]],
-            rsa_key_size=int(incoming["rsa_key_size"]),
             connect_timeout=self.mpc_timeout,
         )
         print("\nPrivate role information")
@@ -391,7 +390,6 @@ class AvalonClient:
             listen_host=self.listen_host,
             configuration=configuration,
             local_fail_vote=local_vote,
-            rsa_key_size=int(incoming["rsa_key_size"]),
             connect_timeout=self.mpc_timeout,
         )
         # Send only the final mission_failed result to server.
