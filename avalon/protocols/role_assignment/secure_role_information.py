@@ -99,7 +99,6 @@ async def run_secure_role_information(
                     visible_evil_player_ids.append(target_id)
 
         private_lines = private_role_lines_from_visible(
-            player_id=party_id,
             player_names=player_names,
             role=role,
             visible_evil_player_ids=visible_evil_player_ids,

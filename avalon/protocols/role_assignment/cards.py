@@ -19,15 +19,6 @@ class RoleCard:
         # Later encryption works more cleanly with positive non-zero values.
         return self.card_id + 1
 
-    def public_dict(self):
-        return {
-            "card_id": self.card_id,
-            "role": self.role.value,
-            "copy_index": self.copy_index,
-            "label": self.label,
-            "encoded_value": self.encoded_value,
-        }
-
 
 def build_role_cards(num_players):
     roles = build_roles(num_players)
@@ -40,25 +31,9 @@ def build_role_cards(num_players):
     return cards
 
 
-def role_from_encoded_value(cards, encoded_value):
-    encoded_value = int(encoded_value)
-    for card in cards:
-        if card.encoded_value == encoded_value:
-            return card.role
-    raise AvalonError(f"Unknown encoded role card value: {encoded_value}")
-
-
 def card_from_encoded_value(cards, encoded_value):
     encoded_value = int(encoded_value)
     for card in cards:
         if card.encoded_value == encoded_value:
             return card
     raise AvalonError(f"Unknown encoded role card value: {encoded_value}")
-
-
-def roles_from_cards(cards):
-    return [card.role for card in cards]
-
-
-def card_labels(cards):
-    return [card.label for card in cards]
