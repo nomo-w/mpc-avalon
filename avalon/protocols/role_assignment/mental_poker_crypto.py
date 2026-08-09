@@ -4,8 +4,8 @@ import secrets
 from .cards import card_from_encoded_value
 
 
-# A fixed prime modulus for the Mental Poker prototype.
-# This is enough for a study prototype, not production cryptography.
+# Fixed prime modulus used by the role-card encryption.
+# It keeps this project simple; it is not production cryptography.
 MENTAL_POKER_PRIME = (1 << 127) - 1
 
 
@@ -47,9 +47,6 @@ class CommutativeCipherKey:
     def encrypt_deck(self, deck_values):
         return [self.encrypt_value(value) for value in deck_values]
 
-    def decrypt_deck(self, deck_values):
-        return [self.decrypt_value(value) for value in deck_values]
-
 
 def _validate_group_value(value, modulus):
     value = int(value)
@@ -70,7 +67,3 @@ def card_from_plaintext(cards, plaintext):
 
 def deck_plaintexts(cards):
     return [card_plaintext(card) for card in cards]
-
-
-def cards_from_plaintexts(cards, plaintext_values):
-    return [card_from_plaintext(cards, value) for value in plaintext_values]

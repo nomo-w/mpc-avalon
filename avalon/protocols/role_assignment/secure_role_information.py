@@ -23,8 +23,8 @@ async def run_secure_role_information(
     rsa_key_size=2048,
     connect_timeout=30.0,
 ):
-    # This computes Avalon role information without revealing the full role table.
-    # Each output bit is revealed only to the viewer who should see it.
+    # Compute Avalon role information without opening the full role table.
+    # Each output is opened only to the player who needs to see it.
     if isinstance(local_role, Role):
         role = local_role
     else:
@@ -58,8 +58,8 @@ async def run_secure_role_information(
         merlin_shares = []
         evil_shares = []
         for owner_id in range(party_count):
-            # Only the owner inputs its real role bits.
-            # Other parties use zero while receiving the owner's shares.
+            # Each player shares two private bits: is_merlin and is_evil.
+            # Only the owner knows the real values at this point.
             owner_merlin = local_bits["is_merlin"] if party_id == owner_id else 0
             owner_evil = local_bits["is_evil"] if party_id == owner_id else 0
             merlin_shares.append(
@@ -80,8 +80,7 @@ async def run_secure_role_information(
         visible_evil_player_ids = []
         for viewer_id in range(party_count):
             for target_id in range(party_count):
-                # All parties run the same circuit in the same order.
-                # Only viewer_id receives this output bit.
+                # This circuit answers: can viewer_id see target_id as evil?
                 output_share = await role_knowledge_circuit(
                     runtime=runtime,
                     viewer_is_merlin_share=merlin_shares[viewer_id],

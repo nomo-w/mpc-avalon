@@ -26,8 +26,8 @@ async def run_network_mental_poker_role_assignment(
     connect_timeout=30.0,
     rng=None,
 ):
-    # This is the networked version of the Mental Poker role dealing prototype.
-    # Each client takes one turn to encrypt and shuffle the role deck.
+    # Networked Mental Poker role assignment.
+    # All clients follow the same deck updates in party_id order.
     if not session_id.strip():
         raise ValueError("session_id cannot be empty")
     party_count = len(endpoints)
@@ -47,7 +47,7 @@ async def run_network_mental_poker_role_assignment(
     )
     await network.start()
     try:
-        # Step 1: every party encrypts and shuffles the whole deck once.
+        # Step 1: each party adds one encryption layer and shuffles once.
         for dealer_id in range(party_count):
             tag = f"{session_id}:role-deck-step:{dealer_id}"
             if party_id == dealer_id:
@@ -60,7 +60,7 @@ async def run_network_mental_poker_role_assignment(
                     payload={"deck": [str(value) for value in deck]},
                 )
             else:
-                # Other parties receive the next encrypted deck.
+                # Other parties replace their local deck with the broadcast one.
                 payload = await network.receive(
                     dealer_id,
                     expected_type="role_deck_step",
@@ -69,7 +69,7 @@ async def run_network_mental_poker_role_assignment(
                 deck = [int(value) for value in payload["deck"]]
 
         # Step 2: card i belongs to party i.
-        # Everyone helps remove layers, but only the owner removes the final layer.
+        # Other parties remove their layers first. The owner removes the last one.
         own_card = None
         for owner_id in range(party_count):
             partly_decrypted = int(deck[owner_id])
@@ -86,7 +86,7 @@ async def run_network_mental_poker_role_assignment(
                         payload={"value": str(partly_decrypted)},
                     )
                 else:
-                    # Everyone follows the same partial-decryption chain.
+                    # Everyone receives the newest value for this card.
                     payload = await network.receive(
                         helper_id,
                         expected_type="role_card_layer_removed",

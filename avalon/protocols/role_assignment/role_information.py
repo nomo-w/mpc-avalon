@@ -2,7 +2,7 @@ from avalon.game.models import Alignment, Role
 
 
 def role_bits(role):
-    # Role information only needs these two private bits.
+    # These two bits are enough for Merlin/evil visibility.
     role = _clean_role(role)
     is_evil = 1 if role.alignment == Alignment.EVIL else 0
     return {
@@ -12,7 +12,7 @@ def role_bits(role):
 
 
 def private_role_lines_from_visible(player_names, role, visible_evil_player_ids):
-    # Same text format, but caller already computed the visible evil list.
+    # Build the private text shown only on this player's client.
     role = _clean_role(role)
     visible_evil_player_ids = list(visible_evil_player_ids)
     alignment = role.alignment
