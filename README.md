@@ -87,6 +87,24 @@ connections, but any player may be selected on a later mission.
 - The server receives only the final `mission_failed` Boolean result.
 - After three successful missions, the Assassin chooses a target.
 
+## Tests
+
+Run unit tests and protocol tests:
+
+```bash
+python -B -m unittest discover -s tests -v
+```
+
+Run the automated 5-player system test:
+
+```bash
+python -B scripts/run_system_test.py
+```
+
+The system test starts one server and five clients in the same Python process.
+It uses scripted input instead of manual terminal input, so it can check the
+full flow from role assignment to game over.
+
 ## Secure Role Assignment
 
 Role assignment is always secure in the current version. The server does not
