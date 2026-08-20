@@ -100,8 +100,8 @@ async def mission_failed_threshold_circuit(runtime, fail_vote_shares, fail_thres
 
 async def role_knowledge_circuit(runtime, viewer_is_merlin_share, viewer_is_evil_share,
     target_is_evil_share, same_player, circuit_name="role-knowledge"):
-    # This is not used by current game flow.
-    # It is kept for future secure role information.
+    # This is used by the current secure role-information protocol.
+    # It decides which target players are visible to one viewer.
     # Output 1 means viewer is allowed to know target is evil.
     namer = GateNamer(circuit_name)
     merlin_sees_target = await runtime.and_gate(
